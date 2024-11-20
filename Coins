@@ -1,0 +1,96 @@
+import requests
+import pandas as pd
+from datetime import datetime
+from github import Github
+import os
+
+# CoinGecko API URL
+COINGECKO_API_URL = "https://api.coingecko.com/api/v3/coins/markets"
+GITHUB_REPO = "your_github_username/your_repository_name"
+GITHUB_TOKEN = "your_github_personal_access_token"
+FILE_PATH = "meme_coin_data.csv"  # File name to save daily data
+
+# Function to get top meme coins data
+def get_meme_coins():
+    params = {
+        "vs_currency": "usd",
+        "category": "meme",
+        "order": "market_cap_desc",
+        "per_page": 10,
+        "page": 1,
+        "sparkline": False,
+    }
+    
+    try:
+        response = requests.get(COINGECKO_API_URL, params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        return []
+
+# Function to create or update a daily CSV table
+def update_table(data):
+    # Get today's date
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # Prepare a DataFrame to store the data
+    df = pd.DataFrame(data)
+    
+    # If CSV file already exists, append new data; otherwise, create a new file
+    if os.path.exists(FILE_PATH):
+        df_existing = pd.read_csv(FILE_PATH)
+        df_existing = pd.concat([df_existing, df], ignore_index=True)
+        df_existing.to_csv(FILE_PATH, index=False)
+    else:
+        df.to_csv(FILE_PATH, index=False)
+
+    print(f"Data saved for {today_date} in {FILE_PATH}")
+
+# Function to push the table to GitHub
+def push_to_github():
+    g = Github(GITHUB_TOKEN)
+    repo = g.get_repo(GITHUB_REPO)
+    
+    # Check if the file exists in the repo, and update it
+    try:
+        file = repo.get_contents(FILE_PATH)
+        repo.update_file(file.path, "Update daily data", open(FILE_PATH).read(), file.sha)
+        print(f"File updated in GitHub: {FILE_PATH}")
+    except:
+        # If file doesn't exist, create a new one
+        with open(FILE_PATH, "r") as file_content:
+            repo.create_file(FILE_PATH, "Add initial meme coin data", file_content.read())
+            print(f"File created in GitHub: {FILE_PATH}")
+
+# Main function to get data, update table, and push to GitHub
+def main():
+    print("Fetching data for meme coins...")
+    meme_coins_data = get_meme_coins()
+
+    if meme_coins_data:
+        # Prepare data for table (market cap, volume, liquidity, and price)
+        today_data = []
+        for coin in meme_coins_data:
+            today_data.append({
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "coin_name": coin["name"],
+                "coin_symbol": coin["symbol"],
+                "market_cap": coin["market_cap"],
+                "volume": coin["total_volume"],
+                "liquidity": coin.get("liquidity_score", "N/A"),  # CoinGecko doesn't provide liquidity directly
+                "price": coin["current_price"]
+            })
+        
+        # Update the table with the daily data
+        update_table(today_data)
+
+        # Push the updated table to GitHub
+        push_to_github()
+    else:
+        print("Failed to fetch meme coin data.")
+
+# Schedule the script to run daily (use schedule library)
+if __name__ == "__main__":
+    main()
+
